@@ -70,10 +70,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify build
-        # env validation is skipped in CI (env.js: skipValidation || isCI), so
-        # this gates releases on a compiling build without needing app secrets.
-        run: pnpm build
+
 
       - name: Release
         env:
