@@ -1,0 +1,81 @@
+name: Release
+
+# Cut a new version whenever commits land on main. semantic-release reads the
+# Conventional Commit history since the last git tag, decides the next SemVer
+# number, updates package.json + CHANGELOG.md, tags the commit, and publishes a
+# GitHub Release. The version-bump commit it pushes back carries "[skip ci]" so
+# this workflow does not retrigger itself.
+
+on:
+  push:
+    branches:
+      - main
+
+# semantic-release needs to push the release commit/tag and create GitHub
+# Releases, so the GITHUB_TOKEN must be granted write access here.
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      # Disable Husky in this job. semantic-release makes the version-bump commit
+      # here; without this, the local pre-commit hook (a full build) and the
+      # commit-msg/commitlint hook would run against the generated release-notes
+      # commit and fail it (long lines in the body), aborting the release.
+      HUSKY: '0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags are required for semantic-release to determine
+          # the last release and compute the next version.
+          fetch-depth: 0
+          # semantic-release authenticates with GITHUB_TOKEN itself; leaving the
+          # checkout credentials in place can conflict with its push.
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          # Version is read from the "packageManager" field in package.json.
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_ENV
+
+      - uses: actions/cache@v4
+        name: Setup pnpm cache
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify build
+        # env validation is skipped in CI (env.js: skipValidation || isCI), so
+        # this gates releases on a compiling build without needing app secrets.
+        run: pnpm build
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec semantic-release
